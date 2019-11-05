@@ -1,14 +1,10 @@
 import cirq
 
-from cirq import ops
-
 from cirq.aqt import aqt_device
 from cirq.aqt import AQTSimulator
 
-from cirq import PointOptimizer, PointOptimizationSummary
-
-# Cauta undeva notebookul cu experimentul cu distilarea de S
-# gasit -> scrie experimentul in Cirq folosind aqt ca device
+import optimizers.measurements_last as ml
+import optimizers.replace_opposite as ro
 
 def gen_s_dist_circuit(cirq_circuit, qubits):
     # fig 32 page 38 https://arxiv.org/pdf/1208.0928.pdf
@@ -135,74 +131,6 @@ def generate_stats(results, parities):
     return stats
 
 
-class ReplaceOppositeRotations(PointOptimizer):
-    """
-    Replaces  opposite rotations with identity.
-    """
-    def optimization_at(self, circuit, index, op):
-
-        if not self.is_single_qubit_rotation(op):
-            return None
-
-        n_idx = circuit.next_moment_operating_on(op.qubits, index + 1)
-        if n_idx is None:
-            return None
-
-        next_op = circuit.operation_at(op.qubits[0], n_idx)
-
-        same_type = False
-        if isinstance(op.gate, ops.XPowGate) and isinstance(next_op.gate, ops.XPowGate):
-            same_type = True
-        if isinstance(op.gate, ops.ZPowGate) and isinstance(next_op.gate, ops.ZPowGate):
-            same_type = True
-        if isinstance(op.gate, ops.YPowGate) and isinstance(next_op.gate, ops.YPowGate):
-            same_type = True
-
-        if not same_type:
-            return None
-
-        if op.gate.global_shift != next_op.gate.global_shift:
-            return None
-
-        if op.gate.exponent != -next_op.gate.exponent:
-            return None
-
-
-        return PointOptimizationSummary(clear_span=n_idx - index + 1,
-                                        clear_qubits=op.qubits,
-                                        new_operations=[])# Two opposite rotations are erased
-
-    def is_single_qubit_rotation(self, op):
-        return isinstance(op.gate, (ops.XPowGate, ops.YPowGate, ops.ZPowGate))
-
-
-class MoveMeasurementsLastPass():
-    """
-    An optimization pass that moves measurements to the last moment
-    """
-
-    def __init__(self) -> None:
-        return
-
-    def __call__(self, circuit: cirq.Circuit):
-        self.optimize_circuit(circuit)
-
-    def optimize_circuit(self, circuit: cirq.Circuit) -> None:
-        # list of tuples [int, ops.Operation]
-        deletions = []
-        for moment_index, moment in enumerate(circuit):
-            for op in moment.operations:
-                if (op is not None) and isinstance (op.gate, ops.MeasurementGate):
-                    deletions.append((moment_index, op))
-        circuit.batch_remove(deletions)
-
-        opss = []
-        for oldm, op in deletions:
-            opss.append(op)
-        last_moment = cirq.Moment(opss)
-        circuit.append(last_moment)
-
-
 def main():
     print("Hello World!")
 
@@ -223,14 +151,14 @@ def main():
     print(cirq_circuit)
 
     # is there an optimiser that cancels neighbouring gates of opposite angles?
-    pointoptimizer = ReplaceOppositeRotations()
+    pointoptimizer = ro.ReplaceOppositeRotations()
     pointoptimizer.optimize_circuit(cirq_circuit)
-    print(cirq_circuit)
+    # print(cirq_circuit)
 
     # move measurements to the last moment
-    measurementsopt = MoveMeasurementsLastPass()
+    measurementsopt = ml.MoveMeasurementsLastPass()
     measurementsopt.optimize_circuit(cirq_circuit)
-    print(cirq_circuit)
+    # print(cirq_circuit)
 
 
     # Instantiate a simulator
@@ -252,7 +180,7 @@ def main():
     multi_body_meas["plaq3"] = [1, 4, 6, 7]
     # this indicates if the code word has a flipped sign
     multi_body_meas["_byprod"] = list(range(1, 8))
-
+    print("Multi bodty measurements are")
     print(multi_body_meas)
 
     plaq_parity = {}
@@ -260,11 +188,10 @@ def main():
         plaq_parity[plaq] = compute_parity(multi_body_meas[plaq], results)
 
     stats = generate_stats(results, plaq_parity)
+    print("Statistics")
     print(stats)
 
 
 
 if __name__ == "__main__":
     main()
-
-    cirq.google.Bristlecone
